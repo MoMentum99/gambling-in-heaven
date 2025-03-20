@@ -91,7 +91,7 @@ pub mod coin_flip {
         bet.settled = false;
         bet.escrow_token_account = ctx.accounts.escrow_token_account.key();
         bet.user_seed = user_seed;
-        bet.bump = *ctx.bumps.get("bet").unwrap();
+        bet.bump = ctx.bumps.bet;
 
         Ok(())
     }
@@ -139,17 +139,21 @@ pub mod coin_flip {
 
         if user_won {
             // User won, transfer double the bet amount from house to user
-            let win_amount = bet.amount.checked_mul(2).unwrap();
+            // win_amount 계산 (사용처에서 직접 bet.amount를 사용)
 
             // Transfer bet amount from escrow to user
-            let cpi_accounts_escrow = Transfer {
+            let escrow_cpi_accounts = Transfer {
                 from: ctx.accounts.escrow_token_account.to_account_info(),
                 to: ctx.accounts.user_token_account.to_account_info(),
                 authority: ctx.accounts.bet.to_account_info(),
             };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts_escrow, signer);
-            token::transfer(cpi_ctx, bet.amount)?;
+            let token_program_info = ctx.accounts.token_program.to_account_info();
+            let escrow_cpi_ctx = CpiContext::new_with_signer(
+                token_program_info.clone(),
+                escrow_cpi_accounts,
+                signer
+            );
+            token::transfer(escrow_cpi_ctx, bet.amount)?;
 
             // Transfer additional win amount from house to user
             let house_seeds = &[
@@ -158,13 +162,17 @@ pub mod coin_flip {
             ];
             let house_signer = &[&house_seeds[..]];
 
-            let cpi_accounts_house = Transfer {
+            let house_cpi_accounts = Transfer {
                 from: ctx.accounts.house_token_account.to_account_info(),
                 to: ctx.accounts.user_token_account.to_account_info(),
                 authority: ctx.accounts.house.to_account_info(),
             };
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts_house, house_signer);
-            token::transfer(cpi_ctx, bet.amount)?;
+            let house_cpi_ctx = CpiContext::new_with_signer(
+                token_program_info,
+                house_cpi_accounts,
+                house_signer
+            );
+            token::transfer(house_cpi_ctx, bet.amount)?;
         } else {
             // House won, transfer bet amount from escrow to house
             let cpi_accounts = Transfer {
@@ -172,8 +180,8 @@ pub mod coin_flip {
                 to: ctx.accounts.house_token_account.to_account_info(),
                 authority: ctx.accounts.bet.to_account_info(),
             };
-            let cpi_program = ctx.accounts.token_program.to_account_info();
-            let cpi_ctx = CpiContext::new_with_signer(cpi_program, cpi_accounts, signer);
+            let token_program_info = ctx.accounts.token_program.to_account_info();
+            let cpi_ctx = CpiContext::new_with_signer(token_program_info, cpi_accounts, signer);
             token::transfer(cpi_ctx, bet.amount)?;
         }
 
@@ -276,7 +284,7 @@ pub struct PlaceBet<'info> {
     #[account(mut)]
     pub user_token_account: Account<'info, TokenAccount>,
 
-    #[account(mut, has_one = house)]
+    #[account(mut)]
     pub house_token_account: Account<'info, TokenAccount>,
 
     #[account(
